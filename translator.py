@@ -26,15 +26,17 @@ def process_cli():
 def process(input_file, root_node):
     print(f'; Translating {input_file}')
     extractor = GlobalVariableExtraction()
+    extractor.childParent(root_node)
     extractor.visit(root_node)
     memory_alloc = StaticMemoryAllocation(extractor.results)
     print('; Branching to top level (tl) instructions')
     print('\t\tBR tl')
     memory_alloc.generate()
-    top_level = TopLevelProgram('tl')
+    top_level = TopLevelProgram('tl', extractor.renamedVariables)
     top_level.visit(root_node)
     ep = EntryPoint(top_level.finalize())
     ep.generate() 
+
 
 if __name__ == '__main__':
     main()

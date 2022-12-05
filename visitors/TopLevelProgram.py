@@ -3,15 +3,18 @@ import ast
 LabeledInstruction = tuple[str, str]
 
 class TopLevelProgram(ast.NodeVisitor):
-    """We supports assignments and input/print calls"""
+    """We support assignments and input/print calls"""
     
-    def __init__(self, entry_point) -> None:
+    def __init__(self, entry_point, renamedVariables) -> None:
         super().__init__()
         self.__instructions = list()
         self.__record_instruction('NOP1', label=entry_point)
         self.__should_save = True
         self.__current_variable = None
         self.__elem_id = 0
+        self.__processedConstants = []
+        self.__renamedVariables = renamedVariables
+
 
     def finalize(self):
         self.__instructions.append((None, '.END'))
@@ -23,7 +26,7 @@ class TopLevelProgram(ast.NodeVisitor):
 
     def visit_Assign(self, node):
         # remembering the name of the target
-        self.__current_variable = node.targets[0].id
+        self.__current_variable = self.__renamedVariables[node.targets[0].id]
         # visiting the left part, now knowing where to store the result
         self.visit(node.value)
         if self.__should_save:
@@ -32,11 +35,20 @@ class TopLevelProgram(ast.NodeVisitor):
             self.__should_save = True
         self.__current_variable = None
 
-    def visit_Constant(self, node):
-        self.__record_instruction(f'LDWA {node.value},i')
+
+    def visit_Constant(self, node): 
+
+        inWhile = self.__inWhile(node)
+
+        if (self.__current_variable not in self.__processedConstants) and (inWhile == False):  
+            self.__processedConstants.append(self.__current_variable)
+            self.__should_save = False
+        else:
+            self.__record_instruction(f'LDWA {node.value},i')
+
     
     def visit_Name(self, node):
-        self.__record_instruction(f'LDWA {node.id},d')
+        self.__record_instruction(f'LDWA {self.__renamedVariables[node.id]},d')
 
     def visit_BinOp(self, node):
         self.__access_memory(node.left, 'LDWA')
@@ -58,9 +70,9 @@ class TopLevelProgram(ast.NodeVisitor):
                 self.__should_save = False # DECI already save the value in memory
             case 'print':
                 # We are only supporting integers for now
-                self.__record_instruction(f'DECO {node.args[0].id},d')
+                self.__record_instruction(f'DECO {self.__renamedVariables[node.args[0].id]},d')
             case _:
-                raise ValueError(f'Unsupported function call: { node.func.id}')
+                raise ValueError(f'Unsupported function call: {node.func.id}')
 
     ####
     ## Handling While loops (only variable OP variable)
@@ -78,6 +90,7 @@ class TopLevelProgram(ast.NodeVisitor):
         self.__access_memory(node.test.left, 'LDWA', label = f'test_{loop_id}')
         # right part can only be a variable
         self.__access_memory(node.test.comparators[0], 'CPWA')
+        # print("node test comparators: ", node.test.comparators[0])
         # Branching is condition is not true (thus, inverted)
         self.__record_instruction(f'{inverted[type(node.test.ops[0])]} end_l_{loop_id}')
         # Visiting the body of the loop
@@ -106,9 +119,24 @@ class TopLevelProgram(ast.NodeVisitor):
         if isinstance(node, ast.Constant):
             self.__record_instruction(f'{instruction} {node.value},i', label)
         else:
-            self.__record_instruction(f'{instruction} {node.id},d', label)
+            self.__record_instruction(f'{instruction} {self.__renamedVariables[node.id]},d', label) 
 
     def __identify(self):
         result = self.__elem_id
         self.__elem_id = self.__elem_id + 1
         return result
+
+    def __inWhile(self, node):
+        resultList = []
+        currNode = node
+        while True:
+            try:
+                resultList.append(currNode.parent)
+                currNode = currNode.parent
+            except:
+                break 
+
+        if any(isinstance(i, ast.While) for i in resultList):
+            return True
+        else:
+            return False
