@@ -11,7 +11,8 @@ class TopLevelProgram(ast.NodeVisitor):
         self.__record_instruction('NOP1', label=entry_point)
         self.__should_save = True
         self.__current_variable = None
-        self.__elem_id = 0
+        self.__elem_id_while = 0
+        self.__elem_id_if = 0
         self.__processedConstants = []
         self.__renamedVariables = renamedVariables
 
@@ -79,12 +80,14 @@ class TopLevelProgram(ast.NodeVisitor):
     ####
 
     def visit_While(self, node):
-        loop_id = self.__identify()
+        loop_id = self.__identifyWhile()
         inverted = {
             ast.Lt:  'BRGE', # '<'  in the code means we branch if '>=' 
             ast.LtE: 'BRGT', # '<=' in the code means we branch if '>' 
             ast.Gt:  'BRLE', # '>'  in the code means we branch if '<='
             ast.GtE: 'BRLT', # '>=' in the code means we branch if '<'
+            ast.Eq: 'BRNE',    # '==' in the code means we branch if '!='
+            ast.NotEq: 'BREQ'   # '!=' in the code means we branch if '=='
         }
         # left part can only be a variable
         self.__access_memory(node.test.left, 'LDWA', label = f'test_{loop_id}')
@@ -99,6 +102,47 @@ class TopLevelProgram(ast.NodeVisitor):
         self.__record_instruction(f'BR test_{loop_id}')
         # Sentinel marker for the end of the loop
         self.__record_instruction(f'NOP1', label = f'end_l_{loop_id}')
+
+
+    def visit_If(self, node):
+        loop_id = self.__identifyIf()
+        inverted = {
+            ast.Lt:  'BRGE',    # '<'  in the code means we branch if '>=' 
+            ast.LtE: 'BRGT',    # '<=' in the code means we branch if '>' 
+            ast.Gt:  'BRLE',    # '>'  in the code means we branch if '<='
+            ast.GtE: 'BRLT',    # '>=' in the code means we branch if '<'
+            ast.Eq: 'BRNE',    # '==' in the code means we branch if '!='
+            ast.NotEq: 'BREQ'   # '!=' in the code means we branch if '=='
+        }
+
+        # left part can only be a variable
+        self.__access_memory(node.test.left, 'LDWA', label = f'if_{loop_id}')
+        
+        # right part can only be a variable
+        self.__access_memory(node.test.comparators[0], 'CPWA')
+        
+        # Branching is condition is not true (thus, inverted)
+        self.__record_instruction(f'{inverted[type(node.test.ops[0])]} else_{loop_id}')
+        
+        # Visiting the body of the loop
+        for contents in node.body:
+            self.visit(contents)
+        # mark the end of the if statement
+        self.__record_instruction(f'BR end_if_{loop_id}')
+        
+        # Begin the else statement
+        self.__record_instruction(f'NOP1', label = f'else_{loop_id}')
+
+        # Visit all content in the 'else'. If there is an elif, 
+        # this will recursively call visit_If().
+        for contents in node.orelse:
+            self.visit(contents)
+
+        # Mark the end of the else statement
+        self.__record_instruction(f'BR end_if_{loop_id}')
+
+        # Sentinel marker for the end of the loop
+        self.__record_instruction(f'NOP1', label = f'end_if_{loop_id}')
 
     ####
     ## Not handling function calls 
@@ -121,9 +165,14 @@ class TopLevelProgram(ast.NodeVisitor):
         else:
             self.__record_instruction(f'{instruction} {self.__renamedVariables[node.id]},d', label) 
 
-    def __identify(self):
-        result = self.__elem_id
-        self.__elem_id = self.__elem_id + 1
+    def __identifyWhile(self):
+        result = self.__elem_id_while
+        self.__elem_id_while = self.__elem_id_while + 1
+        return result
+
+    def __identifyIf(self):
+        result = self.__elem_id_if
+        self.__elem_id_if = self.__elem_id_if + 1
         return result
 
     def __inWhile(self, node):
