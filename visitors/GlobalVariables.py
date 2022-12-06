@@ -5,14 +5,17 @@ class GlobalVariableExtraction(ast.NodeVisitor):
         We extract all the left hand side of the global (top-level) assignments
     """
     
-    def __init__(self) -> None:
+    def __init__(self, root_node) -> None:
         super().__init__()
+        self.root_node = root_node
+        self.childParent(self.root_node)
         self.results = set()
         self.renamedVariables = {}
         self.renamedVariableConstant = 1
 
 
-    def visit_Assign(self, node):       
+    def visit_Assign(self, node):  
+
         if len(node.targets) != 1:
             raise ValueError("Only unary assignments are supported")
 

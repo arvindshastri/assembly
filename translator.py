@@ -25,8 +25,7 @@ def process_cli():
 
 def process(input_file, root_node):
     print(f'; Translating {input_file}')
-    extractor = GlobalVariableExtraction()
-    extractor.childParent(root_node)
+    extractor = GlobalVariableExtraction(root_node)
     extractor.visit(root_node)
     memory_alloc = StaticMemoryAllocation(extractor.results)
     print('; Branching to top level (tl) instructions')
