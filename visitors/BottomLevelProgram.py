@@ -1,30 +1,23 @@
 import ast
 
-from visitors.BottomLevelProgram import BottomLevelProgram
-
 LabeledInstruction = tuple[str, str]
-GLOBALVAR = "globalVar"
-LOCALVAR = "localVar"
 
-class TopLevelProgram(ast.NodeVisitor):
+class BottomLevelProgram(ast.NodeVisitor):
     """We support assignments and input/print calls"""
     
-    def __init__(self, entry_point, globalRenamedVariables, localRenamedVariables, returns, stackMemory) -> None:
+    def __init__(self, entry_point, renamedVariables) -> None:
         super().__init__()
         self.__instructions = list()
-        self.__record_instruction('NOP1', label=entry_point)
+        self.__entry_point = entry_point
         self.__should_save = True
         self.__current_variable = None
         self.__elem_id_while = 0
         self.__elem_id_if = 0
-        self.__processedConstants = []
-        self.__globalRenamedVariables = globalRenamedVariables
-        self.__localRenamedVariables = localRenamedVariables
+        self.__renamedVariables = renamedVariables
         self.__functions = []
-        self.__stackMemory = stackMemory
-        self.__typeOfVar = None
-        self.__returns = returns
 
+    def returnInstructions(self):
+        return self.__instructions
 
     def finalize(self):
         self.__instructions.append((None, '.END'))
@@ -32,50 +25,26 @@ class TopLevelProgram(ast.NodeVisitor):
 
     ####
     ## Handling Assignments (variable = ...)
-    ###
+    ####
 
     def visit_Assign(self, node):
-        # remembering the name of the target     
-        if node.targets[0].id in self.__globalRenamedVariables:
-            self.__current_variable = self.__globalRenamedVariables[node.targets[0].id]
-            self.__typeOfVar = GLOBALVAR
-        else:
-            self.__current_variable = self.__localRenamedVariables[node.targets[0].id]
-            self.__typeOfVar = LOCALVAR
-
+        # remembering the name of the target
+        self.__current_variable = self.__renamedVariables[node.targets[0].id]
         # visiting the left part, now knowing where to store the result
         self.visit(node.value)
         if self.__should_save:
-
-            if self.__typeOfVar == GLOBALVAR:
-                self.__record_instruction(f'STWA {self.__current_variable},d')
-            else:
-                self.__record_instruction(f'STWA {self.__current_variable},s')
-
+            self.__record_instruction(f'STWA {self.__current_variable},s')
         else:
             self.__should_save = True
         self.__current_variable = None
 
 
     def visit_Constant(self, node): 
-
-        # checks to see if node within while loop
-        inWhile = self.__inWhile(node)
-
-        # if program has already seen the variable, not in a while loop, and is global, then skip instantiation
-        if (self.__current_variable not in self.__processedConstants) and (inWhile == False) and (self.__typeOfVar == GLOBALVAR):    # ignores store
-            self.__processedConstants.append(self.__current_variable)
-            self.__should_save = False
-        else:  # goes to store
-            self.__record_instruction(f'LDWA {node.value},i')
+        self.__record_instruction(f'LDWA {node.value},i')
 
     
     def visit_Name(self, node):
-        if self.__typeOfVar == GLOBALVAR:
-            self.__record_instruction(f'LDWA {self.__globalRenamedVariables[node.id]},d')
-        else: 
-            self.__record_instruction(f'LDWA {self.__localRenamedVariables[node.id]},s')
-        
+        self.__record_instruction(f'LDWA {self.__renamedVariables[node.id]},s')
 
     def visit_BinOp(self, node):
         self.__access_memory(node.left, 'LDWA')
@@ -93,20 +62,12 @@ class TopLevelProgram(ast.NodeVisitor):
                 self.visit(node.args[0])
             case 'input':
                 # We are only supporting integers for now
-                if self.__typeOfVar == GLOBALVAR:
-                    self.__record_instruction(f'DECI {self.__current_variable},d')
-                    self.__should_save = False # DECI already save the value in memory
-                else:
-                    self.__record_instruction(f'DECI {self.__current_variable},s')
-                    self.__should_save = False # DECI already save the value in memory
+                self.__record_instruction(f'DECI {self.__current_variable},s')
+                self.__should_save = False # DECI already save the value in memory
             case 'print':
                 # We are only supporting integers for now
-                if self.__typeOfVar == GLOBALVAR:
-                    self.__record_instruction(f'DECO {self.__globalRenamedVariables[node.args[0].id]},d')
-                else:
-                    self.__record_instruction(f'DECO {self.__localRenamedVariables[node.args[0].id]},s')
+                self.__record_instruction(f'DECO {self.__renamedVariables[node.args[0].id]},s')
             case _:
-                # create call with name of function
                 if (node.func.id in self.__functions):
                     self.__record_instruction(f'CALL {node.func.id}')
                 else:
@@ -186,7 +147,6 @@ class TopLevelProgram(ast.NodeVisitor):
     ####
 
     def visit_FunctionDef(self, node):
-
         self.__record_instruction(f'NOP1', label = f'{node.name}')
         self.__functions.append(node.name)
 
@@ -194,19 +154,20 @@ class TopLevelProgram(ast.NodeVisitor):
 
         for contents in node.body:
             self.visit(contents)
-        
+
         self.__record_instruction(f'ADDSP {self.__stackMemory},i')
         self.__record_instruction(f'RET')
+        self.__record_instruction('NOP1', label=self.__entry_point)
+        
 
+    # def visit_Return(self, node):
+    #     if len(node) == 0:
+    #         self.__record_instruction(f'RET')
+    #     # else:
+    #     #     self._record_instruction(f'STWA {')
 
-    def visit_Return(self, node):
-
-        try:
-            self.__record_instruction(f'LDWA {node.value.id},s')
-            self.__record_instruction(f'STWA {self.__returns.pop()[0]},s')
-        except:
-            pass
-
+    #     try:
+    #         self.__record_instruction(f'')
 
     ####
     ## Helper functions to 
@@ -219,10 +180,7 @@ class TopLevelProgram(ast.NodeVisitor):
         if isinstance(node, ast.Constant):
             self.__record_instruction(f'{instruction} {node.value},i', label)
         else:
-            if node.id in self.__globalRenamedVariables:
-                self.__record_instruction(f'{instruction} {self.__globalRenamedVariables[node.id]},d', label) 
-            else:
-                self.__record_instruction(f'{instruction} {self.__localRenamedVariables[node.id]},s', label)
+            self.__record_instruction(f'{instruction} {self.__renamedVariables[node.id]},s', label) 
 
     def __identifyWhile(self):
         result = self.__elem_id_while
@@ -237,8 +195,6 @@ class TopLevelProgram(ast.NodeVisitor):
     def __inWhile(self, node):
         resultList = []
         currNode = node
-
-        # check node lineage until reaching root node
         while True:
             try:
                 resultList.append(currNode.parent)
@@ -246,7 +202,6 @@ class TopLevelProgram(ast.NodeVisitor):
             except:
                 break 
 
-        # if there is a while node in the lineage, return true
         if any(isinstance(i, ast.While) for i in resultList):
             return True
         else:

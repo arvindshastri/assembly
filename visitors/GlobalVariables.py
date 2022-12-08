@@ -22,6 +22,7 @@ class GlobalVariableExtraction(ast.NodeVisitor):
         if node.targets[0].id in self.renamedVariables:
             pass
         else:
+            #  generate a arbitrarily defined renamed variable for variables longer than 8 characters
             if len(node.targets[0].id) > 8:
                 renamed = "zzz" + str(self.renamedVariableConstant)
                 self.renamedVariableConstant += 1
@@ -38,7 +39,8 @@ class GlobalVariableExtraction(ast.NodeVisitor):
                 self.results.add((self.renamedVariables[node.targets[0].id], None))    
             
             
-    '''Credit: https://stackoverflow.com/questions/34570992/getting-parent-of-ast-node-in-python'''        
+    '''Credit: https://stackoverflow.com/questions/34570992/getting-parent-of-ast-node-in-python'''     
+    #  define children and parents of each node in the AST tree upon initialization
     def childParent(self, root_node):
         for node in ast.walk(root_node):
             for child in ast.iter_child_nodes(node):
@@ -47,6 +49,5 @@ class GlobalVariableExtraction(ast.NodeVisitor):
             
 
     def visit_FunctionDef(self, node):
-        """We do not visit function definitions, they are not global by definition"""
         pass
    
